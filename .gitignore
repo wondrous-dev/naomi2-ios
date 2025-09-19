@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# System stuff
+.DS_Store
+.vscode
+/scripts/playground.py
+.idea/
+.dccache
+
+# Environments
+.venv
+venv
+secrets

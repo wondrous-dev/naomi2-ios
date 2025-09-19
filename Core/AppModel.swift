@@ -10,81 +10,32 @@ import Combine
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var goals: [Goal]
-    @Published var entries: [DailyEntry]
     @Published var profile: UserProfile
     @Published var chatHistory: [ChatMessage]
 
-    private let chatService: AIChatService
+    private let remoteChatService: RemoteChatService
+    private var hasLoadedChatHistoryOnce = false
+    private static let migrationFlagKey = "store.migrated.removeGoalsEntries.v1"
 
     init(
-        goals: [Goal] = CodableStore.load([Goal].self, forKey: StoreKeys.goals) ?? [],
-        entries: [DailyEntry] = CodableStore.load([DailyEntry].self, forKey: StoreKeys.entries) ?? [],
         profile: UserProfile = CodableStore.load(UserProfile.self, forKey: StoreKeys.profile) ?? UserProfile(),
         chatHistory: [ChatMessage] = CodableStore.load([ChatMessage].self, forKey: StoreKeys.chat) ?? [],
-        chatService: AIChatService = AIChatService()
+        remoteChatService: RemoteChatService = RemoteChatService()
     ) {
-        self.goals = goals
-        self.entries = entries
+        // One-time migration: remove legacy keys from pre-chat-only versions
+        Self.migrateIfNeeded()
         self.profile = profile
         self.chatHistory = chatHistory
-        self.chatService = chatService
+        self.remoteChatService = remoteChatService
     }
 
     // MARK: - Persistence
     private func persistAll() {
-        CodableStore.save(goals, forKey: StoreKeys.goals)
-        CodableStore.save(entries, forKey: StoreKeys.entries)
         CodableStore.save(profile, forKey: StoreKeys.profile)
         CodableStore.save(chatHistory, forKey: StoreKeys.chat)
     }
 
-    // MARK: - Goals
-    func addGoal(title: String) {
-        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        goals.append(Goal(title: title))
-        persistAll()
-    }
-
-    func updateGoal(_ goal: Goal, title: String? = nil, isActive: Bool? = nil) {
-        guard let index = goals.firstIndex(where: { $0.id == goal.id }) else { return }
-        var copy = goals[index]
-        if let title = title { copy.title = title }
-        if let isActive = isActive { copy.isActive = isActive }
-        goals[index] = copy
-        persistAll()
-    }
-
-    func deleteGoal(_ goal: Goal) {
-        goals.removeAll { $0.id == goal.id }
-        // Optionally also remove related entries
-        entries.removeAll { $0.goalId == goal.id }
-        persistAll()
-    }
-
-    // MARK: - Daily Entries
-    func entry(for goalId: UUID, on date: Date) -> DailyEntry? {
-        let day = date.stripTime()
-        return entries.first { $0.goalId == goalId && $0.date.stripTime() == day }
-    }
-
-    func setStatus(for goal: Goal, on date: Date = Date(), status: EntryStatus) {
-        let day = date.stripTime()
-        if let idx = entries.firstIndex(where: { $0.goalId == goal.id && $0.date.stripTime() == day }) {
-            entries[idx].status = status
-        } else {
-            entries.append(DailyEntry(date: day, goalId: goal.id, status: status))
-        }
-        persistAll()
-    }
-
-    func clearStatus(for goal: Goal, on date: Date = Date()) {
-        let day = date.stripTime()
-        if let idx = entries.firstIndex(where: { $0.goalId == goal.id && $0.date.stripTime() == day }) {
-            entries[idx].status = .pending
-            persistAll()
-        }
-    }
+    // Goals and daily entries removed
 
     // MARK: - Profile
     func setDisplayName(_ name: String) {
@@ -96,21 +47,48 @@ final class AppModel: ObservableObject {
     func sendChat(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        chatHistory.append(ChatMessage(role: .user, text: trimmed))
+        chatHistory.append(ChatMessage(source: .user, text: trimmed, userId: nil, companionId: "1234567", metadata: nil))
         persistAll()
+        do {
+            if let reply = try await remoteChatService.sendMessage(userId: nil, message: trimmed, companionId: "1234567") {
+                chatHistory.append(reply)
+                persistAll()
+            }
+        } catch {
+            print("[AppModel] sendChat error: \(error)")
+            // Keep user message; consider surfacing an error toast if needed.
+        }
+    }
 
-        let response = await chatService.reply(to: trimmed, contextGoals: goals, profile: profile)
-        chatHistory.append(ChatMessage(role: .assistant, text: response))
-        persistAll()
+    func loadChatHistory(limit: Int = 15, offset: Int = 0) async {
+        print("[AppModel] loadChatHistory(limit: \(limit), offset: \(offset))")
+        do {
+            let history = try await remoteChatService.fetchHistory(companionId: "1234567", limit: limit, offset: offset)
+            chatHistory = history
+            persistAll()
+        } catch {
+            print("[AppModel] loadChatHistory error: \(error)")
+            // Keep existing local history on failure
+        }
+    }
+
+    func ensureChatHistoryLoadedOnce(limit: Int = 15, offset: Int = 0) async {
+        guard !hasLoadedChatHistoryOnce else { return }
+        hasLoadedChatHistoryOnce = true
+        await loadChatHistory(limit: limit, offset: offset)
     }
 }
 
-// MARK: - Helpers
-private extension Date {
-    func stripTime() -> Date {
-        let calendar = Calendar.current
-        let comps = calendar.dateComponents([.year, .month, .day], from: self)
-        return calendar.date(from: comps) ?? self
+// MARK: - Migration
+extension AppModel {
+    private static func migrateIfNeeded(defaults: UserDefaults = .standard) {
+        if defaults.bool(forKey: migrationFlagKey) { return }
+        // Remove legacy keys for old features
+        CodableStore.remove(keys: [
+            "store.goals",
+            "store.entries"
+        ], defaults: defaults)
+        defaults.set(true, forKey: migrationFlagKey)
     }
 }
 
@@ -118,11 +96,6 @@ private extension Date {
 extension AppModel {
     static var preview: AppModel {
         let model = AppModel()
-        model.goals = [
-            Goal(title: "Meditate"),
-            Goal(title: "Workout"),
-            Goal(title: "Read 20 min", isActive: false)
-        ]
         model.profile = UserProfile(displayName: "Alex")
         return model
     }

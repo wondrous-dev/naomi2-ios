@@ -12,14 +12,6 @@ struct ContentView: View {
 
     var body: some View {
         TabView {
-            DailyView()
-                .tabItem {
-                    Label("Daily", systemImage: "checkmark.circle")
-                }
-            GoalsView()
-                .tabItem {
-                    Label("Goals", systemImage: "target")
-                }
             ChatView()
                 .tabItem {
                     Label("Coach", systemImage: "message")

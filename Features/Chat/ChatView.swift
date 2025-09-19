@@ -6,59 +6,120 @@
 //
 
 import SwiftUI
+import Inject
 
 struct ChatView: View {
+    @ObserveInjection var inject
     @EnvironmentObject var app: AppModel
     @State private var inputText: String = ""
     @State private var isSending = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            ForEach(app.chatHistory) { message in
-                                messageBubble(message)
-                                    .id(message.id)
+            ZStack {
+                // Background image
+                Image("NaomiBackground")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+
+                // Readability gradient overlay
+                LinearGradient(
+                    colors: [Color.black.opacity(0.05), Color.black.opacity(0.35)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 12) {
+                                ForEach(app.chatHistory) { message in
+                                    MessageView(message: message)
+                                        .id(message.id)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 12)
+                            .padding(.bottom, 120) // room for input bar inset
+                        }
+                        .onChange(of: app.chatHistory.count) { _ in
+                            if let last = app.chatHistory.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                        }
+                        .task {
+                            // Load initial history when the view appears
+                            if app.chatHistory.isEmpty {
+                                await app.loadChatHistory()
                             }
                         }
-                        .padding()
-                    }
-                    .onChange(of: app.chatHistory.count) { _ in
-                        if let last = app.chatHistory.last { proxy.scrollTo(last.id, anchor: .bottom) }
                     }
                 }
-
-                HStack {
+            }
+            .navigationTitle("")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Text("Hana")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(.ultraThinMaterial)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                        )
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .safeAreaInset(edge: .top) {
+                Color.clear.frame(height: 6)
+            }
+            .safeAreaInset(edge: .bottom) {
+                HStack(spacing: 10) {
                     TextField("Message", text: $inputText, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 16))
+                        .padding(.vertical, 8)
+                        .padding(.leading, 8)
+
                     Button {
-                        Task {
-                            await send()
-                        }
+                        Task { await send() }
                     } label: {
                         Image(systemName: isSending ? "hourglass" : "paperplane.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(10)
+                            .background(
+                                Circle().fill(Color.accentColor.opacity(
+                                    (isSending || inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ? 0.5 : 0.95
+                                ))
+                            )
                     }
                     .disabled(isSending || inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .padding()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .shadow(color: Color.black.opacity(0.15), radius: 10, y: 4)
+                )
+                .overlay(
+                    Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1)
+                )
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
             }
-            .navigationTitle("Coach")
+            .enableInjection()
         }
     }
 
-    @ViewBuilder
-    private func messageBubble(_ message: ChatMessage) -> some View {
-        HStack {
-            if message.role == .user { Spacer() }
-            Text(message.text)
-                .padding(10)
-                .background(message.role == .user ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            if message.role == .assistant { Spacer() }
-        }
-    }
+    
 
     private func send() async {
         guard !isSending else { return }

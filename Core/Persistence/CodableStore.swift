@@ -8,8 +8,6 @@
 import Foundation
 
 enum StoreKeys {
-    static let goals = "store.goals"
-    static let entries = "store.entries"
     static let profile = "store.profile"
     static let chat = "store.chat"
 }
@@ -31,6 +29,23 @@ struct CodableStore {
         } catch {
             // Intentionally no-op for now
         }
+    }
+
+    static func remove(forKey key: String, defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key)
+    }
+
+    static func remove(keys: [String], defaults: UserDefaults = .standard) {
+        keys.forEach { defaults.removeObject(forKey: $0) }
+    }
+
+    static func keys(withPrefix prefix: String, defaults: UserDefaults = .standard) -> [String] {
+        Array(defaults.dictionaryRepresentation().keys).filter { $0.hasPrefix(prefix) }
+    }
+
+    static func wipeAllStoreKeys(defaults: UserDefaults = .standard) {
+        let keys = keys(withPrefix: "store.", defaults: defaults)
+        remove(keys: keys, defaults: defaults)
     }
 }
 
