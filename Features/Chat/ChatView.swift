@@ -48,10 +48,11 @@ struct ChatView: View {
                             if let last = app.chatHistory.last { proxy.scrollTo(last.id, anchor: .bottom) }
                         }
                         .task {
-                            // Load initial history when the view appears
-                            if app.chatHistory.isEmpty {
-                                await app.loadChatHistory()
-                            }
+                            // Load once per app lifetime to avoid dup fetches
+                            await app.ensureChatHistoryLoadedOnce(limit: 15, offset: 0)
+                        }
+                        .onAppear {
+                            if let last = app.chatHistory.last { proxy.scrollTo(last.id, anchor: .bottom) }
                         }
                     }
                 }

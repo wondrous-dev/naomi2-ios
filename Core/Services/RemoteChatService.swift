@@ -49,7 +49,7 @@ public struct RemoteChatService {
                 return fallback.enumerated().map { idx, f in
                     ChatMessage(
                         id: UUID().uuidString,
-                        timestamp: Int(Date().timeIntervalSince1970),
+                        sentAt: Int(Date().timeIntervalSince1970),
                         source: (f.role.lowercased() == "user") ? .user : .companion,
                         text: f.message,
                         userId: nil,

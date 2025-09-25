@@ -7,6 +7,12 @@
 
 import Foundation
 
+public enum MessageStatus: String, Codable, Equatable {
+    case pending
+    case sent
+    case failed
+}
+
 public enum MessageSource: Codable, Equatable {
     case user
     case companion
@@ -101,46 +107,99 @@ private struct DynamicCodingKeys: CodingKey, Hashable {
 
 public struct ChatMessage: Identifiable, Codable, Equatable {
     public let id: String
-    public let timestamp: Int
+    public let sentAt: Int
     public let source: MessageSource
     public var text: String?
     public let userId: String?
     public let companionId: String?
     public let metadata: [String: JSONValue]?
+    public let displayList: [String]?
+    public var status: MessageStatus?
 
     public var isUser: Bool { source == .user }
 
     public init(
         id: String = UUID().uuidString,
-        timestamp: Int = Int(Date().timeIntervalSince1970),
+        sentAt: Int = Int(Date().timeIntervalSince1970),
         source: MessageSource,
         text: String?,
         userId: String? = nil,
         companionId: String? = nil,
-        metadata: [String: JSONValue]? = nil
+        metadata: [String: JSONValue]? = nil,
+        displayList: [String]? = nil,
+        status: MessageStatus? = nil
     ) {
         self.id = id
-        self.timestamp = timestamp
+        self.sentAt = sentAt
         self.source = source
         self.text = text
         self.userId = userId
         self.companionId = companionId
         self.metadata = metadata
+        self.displayList = displayList
+        self.status = status
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case sentAt
+        case timestamp // legacy persisted key
+        case source
+        case text
+        case userId
+        case companionId
+        case metadata
+        case displayList
+        case status
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? container.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        if let s = try? container.decode(Int.self, forKey: .sentAt) {
+            self.sentAt = s
+        } else if let legacy = try? container.decode(Int.self, forKey: .timestamp) {
+            self.sentAt = legacy
+        } else {
+            self.sentAt = Int(Date().timeIntervalSince1970)
+        }
+        self.source = (try? container.decode(MessageSource.self, forKey: .source)) ?? .companion
+        self.text = try? container.decodeIfPresent(String.self, forKey: .text)
+        self.userId = try? container.decodeIfPresent(String.self, forKey: .userId)
+        self.companionId = try? container.decodeIfPresent(String.self, forKey: .companionId)
+        self.metadata = try? container.decodeIfPresent([String: JSONValue].self, forKey: .metadata)
+        self.displayList = try? container.decodeIfPresent([String].self, forKey: .displayList)
+        self.status = try? container.decodeIfPresent(MessageStatus.self, forKey: .status)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(sentAt, forKey: .sentAt)
+        try container.encode(source, forKey: .source)
+        try container.encodeIfPresent(text, forKey: .text)
+        try container.encodeIfPresent(userId, forKey: .userId)
+        try container.encodeIfPresent(companionId, forKey: .companionId)
+        try container.encodeIfPresent(metadata, forKey: .metadata)
+        try container.encodeIfPresent(displayList, forKey: .displayList)
+        try container.encodeIfPresent(status, forKey: .status)
     }
 }
 
 // MARK: - API DTO mapping
 public struct ChatMessageDTO: Codable {
-    public let id: String
-    public let timestamp: Int
+    public let id: String?
+    public let sentAt: Int
     public let source: MessageSource
     public let text: String?
     public let userId: String?
     public let companionId: String?
     public let metadata: [String: JSONValue]?
+    public let displayList: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id
+        case sentAt = "sent_at"
         case timestamp
         case createdAt = "created_at"
         case source
@@ -148,58 +207,119 @@ public struct ChatMessageDTO: Codable {
         case userId = "user_id"
         case companionId = "companion_id"
         case metadata
+        case displayList = "display_list"
     }
 
     public func toDomain() -> ChatMessage {
-        ChatMessage(
-            id: id,
-            timestamp: timestamp,
+        let resolvedId = id ?? ChatMessageDTO.makeDeterministicId(
+            timestamp: sentAt,
+            source: source,
+            text: text,
+            userId: userId,
+            companionId: companionId
+        )
+        return ChatMessage(
+            id: resolvedId,
+            sentAt: sentAt,
             source: source,
             text: text,
             userId: userId,
             companionId: companionId,
-            metadata: metadata
+            metadata: metadata,
+            displayList: displayList,
+            status: .sent
         )
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(String.self, forKey: .id)
+        self.id = try? container.decodeIfPresent(String.self, forKey: .id)
         self.source = (try? container.decode(MessageSource.self, forKey: .source)) ?? .companion
         self.text = try? container.decodeIfPresent(String.self, forKey: .text)
         self.userId = try? container.decodeIfPresent(String.self, forKey: .userId)
         self.companionId = try? container.decodeIfPresent(String.self, forKey: .companionId)
         self.metadata = try? container.decodeIfPresent([String: JSONValue].self, forKey: .metadata)
+        if let list = try? container.decodeIfPresent([String].self, forKey: .displayList) {
+            self.displayList = list
+        } else {
+            // Try to decode as generic JSON array and stringify for display
+            do {
+                if let raw = try container.decodeIfPresent([JSONValue].self, forKey: .displayList) {
+                    self.displayList = raw.map { ChatMessageDTO.stringify($0) }
+                } else {
+                    self.displayList = nil
+                }
+            } catch {
+                self.displayList = nil
+            }
+        }
 
-        if let ts = try? container.decode(Int.self, forKey: .timestamp) {
-            self.timestamp = ts
+        if let ts = try? container.decode(Int.self, forKey: .sentAt) {
+            self.sentAt = ts
+        } else if let legacyTs = try? container.decode(Int.self, forKey: .timestamp) {
+            self.sentAt = legacyTs
         } else if let createdString = try? container.decode(String.self, forKey: .createdAt) {
             // Try numeric string first
             if let numericTs = Int(createdString) {
-                self.timestamp = numericTs
+                self.sentAt = numericTs
             } else {
                 let iso = ISO8601DateFormatter()
                 if let date = iso.date(from: createdString) {
-                    self.timestamp = Int(date.timeIntervalSince1970)
+                    self.sentAt = Int(date.timeIntervalSince1970)
                 } else {
                     // Last resort: current time
-                    self.timestamp = Int(Date().timeIntervalSince1970)
+                    self.sentAt = Int(Date().timeIntervalSince1970)
                 }
             }
         } else {
-            self.timestamp = Int(Date().timeIntervalSince1970)
+            self.sentAt = Int(Date().timeIntervalSince1970)
         }
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(timestamp, forKey: .timestamp)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(sentAt, forKey: .sentAt)
         try container.encode(source, forKey: .source)
         try container.encodeIfPresent(text, forKey: .text)
         try container.encodeIfPresent(userId, forKey: .userId)
         try container.encodeIfPresent(companionId, forKey: .companionId)
         try container.encodeIfPresent(metadata, forKey: .metadata)
+        try container.encodeIfPresent(displayList, forKey: .displayList)
+    }
+
+    private static func makeDeterministicId(
+        timestamp: Int,
+        source: MessageSource,
+        text: String?,
+        userId: String?,
+        companionId: String?
+    ) -> String {
+        let src: String = (source == .user) ? "1" : "2"
+        let base = "ts:\(timestamp)|src:\(src)|uid:\(userId ?? "")|cid:\(companionId ?? "")|txt:\(text ?? "")"
+        // Simple deterministic identifier; avoid Hasher randomness to keep it stable across launches
+        // Truncate to reasonable length for UI id usage
+        let trimmed = base.count > 180 ? String(base.prefix(180)) : base
+        return "h_\(trimmed)"
+    }
+}
+
+private extension ChatMessageDTO {
+    static func stringify(_ value: JSONValue) -> String {
+        switch value {
+        case .string(let s): return s
+        case .number(let n):
+            if n.truncatingRemainder(dividingBy: 1) == 0 { return String(Int(n)) }
+            return String(n)
+        case .bool(let b): return b ? "true" : "false"
+        case .null: return "null"
+        case .array(let arr):
+            let inner = arr.map { stringify($0) }.joined(separator: ", ")
+            return "[" + inner + "]"
+        case .object(let obj):
+            let inner = obj.map { "\($0): \(stringify($1))" }.sorted().joined(separator: ", ")
+            return "{" + inner + "}"
+        }
     }
 }
 

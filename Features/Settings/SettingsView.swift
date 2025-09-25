@@ -10,6 +10,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var app: AppModel
     @State private var nameDraft: String = ""
+    @State private var showClearDefaultsAlert: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -25,8 +26,29 @@ struct SettingsView: View {
                     }
                     .disabled((nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)).isEmpty)
                 }
+                #if DEBUG
+                Section("Debug") {
+                    Button("Clear Defaults", role: .destructive) {
+                        showClearDefaultsAlert = true
+                    }
+                    .font(.footnote)
+                }
+                #endif
             }
             .navigationTitle("Settings")
+            #if DEBUG
+            .alert("Clear all local settings?", isPresented: $showClearDefaultsAlert) {
+                Button("Clear", role: .destructive) {
+                    #if DEBUG
+                    resetDefaults()
+                    app.clearAllLocalData()
+                    #endif
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This removes all UserDefaults for this app in Debug builds.")
+            }
+            #endif
         }
     }
 }
@@ -37,5 +59,15 @@ struct SettingsView_Previews: PreviewProvider {
             .environmentObject(AppModel.preview)
     }
 }
+
+#if DEBUG
+func resetDefaults() {
+    if let bundleID = Bundle.main.bundleIdentifier {
+        UserDefaults.standard.removePersistentDomain(forName: bundleID)
+        UserDefaults.standard.synchronize()
+        print("✅ UserDefaults cleared for \(bundleID)")
+    }
+}
+#endif
 
 
