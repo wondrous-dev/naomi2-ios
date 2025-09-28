@@ -12,6 +12,7 @@ import Combine
 final class AppModel: ObservableObject {
     @Published var profile: UserProfile
     @Published var chatHistory: [ChatMessage]
+    @Published var snackbarMessage: String?
 
     private let remoteChatService: RemoteChatService
     private var hasLoadedChatHistoryOnce = false
@@ -20,6 +21,7 @@ final class AppModel: ObservableObject {
     // Realtime
     private var realtime: RealtimeChatListening? = RealtimeChatService()
     private var realtimeCancellable: AnyCancellable?
+    private var eventCancellable: AnyCancellable?
 
     init(
         profile: UserProfile = CodableStore.load(UserProfile.self, forKey: StoreKeys.profile) ?? UserProfile(),
@@ -65,6 +67,11 @@ final class AppModel: ObservableObject {
             .sink { [weak self] message in
                 self?.ingestRealtime(message)
             }
+        eventCancellable = realtime?.eventPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                self?.handleRealtimeEvent(event)
+            }
         realtime?.start(userId: "1")
     }
 
@@ -72,11 +79,30 @@ final class AppModel: ObservableObject {
         realtime?.stop()
         realtimeCancellable?.cancel()
         realtimeCancellable = nil
+        eventCancellable?.cancel()
+        eventCancellable = nil
     }
 
     private func ingestRealtime(_ message: ChatMessage) {
         // Merge single message into history
         mergeMessages([message])
+    }
+
+    private func handleRealtimeEvent(_ event: RealtimeEvent) {
+        switch event {
+        case .habitsCreated:
+            showSnackbar("Habit created")
+        }
+    }
+
+    private func showSnackbar(_ text: String) {
+        snackbarMessage = text
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if self?.snackbarMessage == text {
+                self?.snackbarMessage = nil
+            }
+        }
     }
 
     // MARK: - Chat
@@ -176,7 +202,7 @@ final class AppModel: ObservableObject {
                     userId: message.userId ?? existing.userId,
                     companionId: message.companionId ?? existing.companionId,
                         metadata: message.metadata ?? existing.metadata,
-                        displayList: message.displayList ?? existing.displayList,
+                        habitSuggestion: message.habitSuggestion ?? existing.habitSuggestion,
                     status: newStatus
                 )
             } else {

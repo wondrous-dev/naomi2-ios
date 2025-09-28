@@ -9,15 +9,23 @@ import Foundation
 import Combine
 import Ably
 
+public enum RealtimeEvent {
+	case habitsCreated
+}
+
 public protocol RealtimeChatListening: AnyObject {
 	func start(userId: String?)
 	func stop()
 	var messagePublisher: AnyPublisher<ChatMessage, Never> { get }
+	var eventPublisher: AnyPublisher<RealtimeEvent, Never> { get }
 }
 
 public final class RealtimeChatService: RealtimeChatListening {
 	private let subject = PassthroughSubject<ChatMessage, Never>()
 	public var messagePublisher: AnyPublisher<ChatMessage, Never> { subject.eraseToAnyPublisher() }
+
+	private let eventSubject = PassthroughSubject<RealtimeEvent, Never>()
+	public var eventPublisher: AnyPublisher<RealtimeEvent, Never> { eventSubject.eraseToAnyPublisher() }
 
 	private var isStarted = false
 
@@ -74,13 +82,19 @@ public final class RealtimeChatService: RealtimeChatListening {
 
 		channel?.subscribe { [weak self] message in
 			print("[RealtimeChatService] Ably received: name=\(message.name ?? "nil") dataType=\(type(of: message.data))")
-			guard message.name == "message" else { return }
-			guard let data = message.data as? String else {
-				print("[RealtimeChatService] Ably message payload is not String; ignoring")
-				return
+			if message.name == "message" {
+				guard let data = message.data as? String else {
+					print("[RealtimeChatService] Ably message payload is not String; ignoring")
+					return
+				}
+				print("[RealtimeChatService] Incoming payload (prefix 200): \(data.prefix(200))")
+				self?.handleIncomingJSON(data)
+			} else if message.name == "habits_created" {
+				print("[RealtimeChatService] habits_created event received")
+				self?.eventSubject.send(.habitsCreated)
+			} else {
+				// Ignore other events for now
 			}
-			print("[RealtimeChatService] Incoming payload (prefix 200): \(data.prefix(200))")
-			self?.handleIncomingJSON(data)
 		}
 		print("[RealtimeChatService] Subscribed to \(channelName)")
 	}

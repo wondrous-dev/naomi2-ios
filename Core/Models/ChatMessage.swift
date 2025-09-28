@@ -113,7 +113,7 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
     public let userId: String?
     public let companionId: String?
     public let metadata: [String: JSONValue]?
-    public let displayList: [String]?
+    public let habitSuggestion: [String]?
     public var status: MessageStatus?
 
     public var isUser: Bool { source == .user }
@@ -126,7 +126,7 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
         userId: String? = nil,
         companionId: String? = nil,
         metadata: [String: JSONValue]? = nil,
-        displayList: [String]? = nil,
+        habitSuggestion: [String]? = nil,
         status: MessageStatus? = nil
     ) {
         self.id = id
@@ -136,7 +136,7 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
         self.userId = userId
         self.companionId = companionId
         self.metadata = metadata
-        self.displayList = displayList
+        self.habitSuggestion = habitSuggestion
         self.status = status
     }
 
@@ -149,7 +149,8 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
         case userId
         case companionId
         case metadata
-        case displayList
+        case habitSuggestion
+        case legacyDisplayList = "displayList"
         case status
     }
 
@@ -168,7 +169,12 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
         self.userId = try? container.decodeIfPresent(String.self, forKey: .userId)
         self.companionId = try? container.decodeIfPresent(String.self, forKey: .companionId)
         self.metadata = try? container.decodeIfPresent([String: JSONValue].self, forKey: .metadata)
-        self.displayList = try? container.decodeIfPresent([String].self, forKey: .displayList)
+        if let hs = try? container.decodeIfPresent([String].self, forKey: .habitSuggestion) {
+            self.habitSuggestion = hs
+        } else {
+            // Back-compat for locally persisted legacy key
+            self.habitSuggestion = try? container.decodeIfPresent([String].self, forKey: .legacyDisplayList)
+        }
         self.status = try? container.decodeIfPresent(MessageStatus.self, forKey: .status)
     }
 
@@ -181,7 +187,7 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(userId, forKey: .userId)
         try container.encodeIfPresent(companionId, forKey: .companionId)
         try container.encodeIfPresent(metadata, forKey: .metadata)
-        try container.encodeIfPresent(displayList, forKey: .displayList)
+        try container.encodeIfPresent(habitSuggestion, forKey: .habitSuggestion)
         try container.encodeIfPresent(status, forKey: .status)
     }
 }
@@ -195,7 +201,7 @@ public struct ChatMessageDTO: Codable {
     public let userId: String?
     public let companionId: String?
     public let metadata: [String: JSONValue]?
-    public let displayList: [String]?
+    public let habitSuggestion: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -207,7 +213,7 @@ public struct ChatMessageDTO: Codable {
         case userId = "user_id"
         case companionId = "companion_id"
         case metadata
-        case displayList = "display_list"
+        case habitSuggestion = "habit_suggestion"
     }
 
     public func toDomain() -> ChatMessage {
@@ -226,7 +232,7 @@ public struct ChatMessageDTO: Codable {
             userId: userId,
             companionId: companionId,
             metadata: metadata,
-            displayList: displayList,
+            habitSuggestion: habitSuggestion,
             status: .sent
         )
     }
@@ -239,18 +245,19 @@ public struct ChatMessageDTO: Codable {
         self.userId = try? container.decodeIfPresent(String.self, forKey: .userId)
         self.companionId = try? container.decodeIfPresent(String.self, forKey: .companionId)
         self.metadata = try? container.decodeIfPresent([String: JSONValue].self, forKey: .metadata)
-        if let list = try? container.decodeIfPresent([String].self, forKey: .displayList) {
-            self.displayList = list
+
+        // Decode habit_suggestion (new field) as strings or stringify JSON
+        if let hs = try? container.decodeIfPresent([String].self, forKey: .habitSuggestion) {
+            self.habitSuggestion = hs
         } else {
-            // Try to decode as generic JSON array and stringify for display
             do {
-                if let raw = try container.decodeIfPresent([JSONValue].self, forKey: .displayList) {
-                    self.displayList = raw.map { ChatMessageDTO.stringify($0) }
+                if let raw = try container.decodeIfPresent([JSONValue].self, forKey: .habitSuggestion) {
+                    self.habitSuggestion = raw.map { ChatMessageDTO.stringify($0) }
                 } else {
-                    self.displayList = nil
+                    self.habitSuggestion = nil
                 }
             } catch {
-                self.displayList = nil
+                self.habitSuggestion = nil
             }
         }
 
@@ -285,7 +292,7 @@ public struct ChatMessageDTO: Codable {
         try container.encodeIfPresent(userId, forKey: .userId)
         try container.encodeIfPresent(companionId, forKey: .companionId)
         try container.encodeIfPresent(metadata, forKey: .metadata)
-        try container.encodeIfPresent(displayList, forKey: .displayList)
+        try container.encodeIfPresent(habitSuggestion, forKey: .habitSuggestion)
     }
 
     private static func makeDeterministicId(

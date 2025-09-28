@@ -21,7 +21,7 @@ struct MessageView: View {
                     .font(.system(size: 16))
                     .foregroundStyle(.primary)
 
-                if let list = message.displayList, !list.isEmpty {
+                if let list = message.habitSuggestion, !list.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(Array(list.enumerated()), id: \.offset) { _, item in
                             HStack(alignment: .top, spacing: 8) {
