@@ -22,21 +22,32 @@ struct MessageView: View {
                     .foregroundStyle(.primary)
 
                 if let list = message.habitSuggestion, !list.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(list.enumerated()), id: \.offset) { _, item in
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "circle.fill")
-                                    .font(.system(size: 6))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.top, 6)
+                            HStack(alignment: .center, spacing: 10) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(Color.accentColor)
+
                                 Text(item)
-                                    .font(.system(size: 15))
-                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.leading)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(.ultraThinMaterial)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            )
                         }
                     }
-                    .padding(.top, 2)
+                    .padding(.top, 4)
                 }
             }
             .padding(.vertical, 10)
